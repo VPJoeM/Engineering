@@ -46,6 +46,45 @@ get_creds_redfish() {
     return 0
 }
 
+check_psu() {
+    local ip=$1
+    echo -e "\n${CYAN}Checking PSU information for $ip${NC}"
+    echo -e "${YELLOW}------------------------${NC}"
+    
+    # Get power subsystem information
+    response=$(curl -m 10 -s -k -L -u "$redfish_creds" "https://$ip/redfish/v1/Chassis/System.Embedded.1/Power")
+    
+    if [ $? -ne 0 ]; then
+        echo -e "${RED}Failed to retrieve power information${NC}"
+        return 1
+    fi
+    
+    # Extract PSU information using jq
+    psu_count=$(echo "$response" | jq '.PowerSupplies | length')
+    
+    if [ "$psu_count" -eq 0 ]; then
+        echo -e "${YELLOW}No PSU information available${NC}"
+        return 0
+    fi
+
+    for ((i=0; i<psu_count; i++)); do
+        echo -e "${BOLD}${CYAN}PSU $((i+1)):${NC}"
+        echo -e "${YELLOW}Model:${NC} $(echo "$response" | jq -r ".PowerSupplies[$i].Model")"
+        echo -e "${YELLOW}Serial:${NC} $(echo "$response" | jq -r ".PowerSupplies[$i].SerialNumber")"
+        
+        # Color-code status
+        local status=$(echo "$response" | jq -r ".PowerSupplies[$i].Status.Health")
+        case $status in
+            "OK")
+                echo -e "${YELLOW}Status:${NC} ${GREEN}$status${NC}" ;;
+            "Warning")
+                echo -e "${YELLOW}Status:${NC} ${YELLOW}$status${NC}" ;;
+            *)
+                echo -e "${YELLOW}Status:${NC} ${RED}$status${NC}" ;;
+        esac
+    done
+}
+
 check_acs() {
     local ip=$1
     nc -nvz -w 3 -G 3 "$ip" 443 > /dev/null 2>&1
@@ -155,8 +194,9 @@ while true; do
     echo -e "4. ${YELLOW}Set Fan Speed Low${NC}"
     echo -e "5. ${YELLOW}Set Fan Speed Medium${NC}"
     echo -e "6. ${RED}Set Fan Speed High${NC}"
-    echo -e "7. ${RED}Exit${NC}"
-    read -p "Select an option (1-7): " choice
+    echo -e "7. ${CYAN}PSU Inventory Check${NC}"
+    echo -e "8. ${RED}Exit${NC}"
+    read -p "Select an option (1-8): " choice
 
     case $choice in
         1)
@@ -190,6 +230,11 @@ while true; do
             done
             ;;
         7)
+            for ip in "${input_ips[@]}"; do
+                check_psu "$ip"
+            done
+            ;;
+        8)
             echo -e "${GREEN}Exiting...${NC}"
             exit 0
             ;;
